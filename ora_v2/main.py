@@ -14,6 +14,7 @@ from ora_v2.router.router import IncomingMessage, MessageRouter
 from ora_v2.skills.writer import load_builtins
 from ora_v2.transport.rate_limiter import RateLimiter
 from ora_v2.transport.telegram import TelegramTransport
+from ora_v2.report_server import ReportServer, save_report
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +49,12 @@ async def main() -> None:
     )
     await pool.start()
 
+    # Report server for downloadable HTML reports
+    report_server: ReportServer | None = None
+    if s.report_server_enabled:
+        report_server = ReportServer(port=s.report_server_port)
+        report_server.start()
+
     rl = RateLimiter(max_requests=s.telegram_rate_limit_per_hour, window_seconds=3600)
     allowed = set(s.telegram_allowed_chat_ids)
 
@@ -69,7 +76,16 @@ async def main() -> None:
             sess = await store.get_session(chat_id)
             sess.agent_status = "completed"
             await store.save_session(sess)
-            await _send(chat_id, "Исследование завершено.")
+
+            # Save as HTML report and send download link
+            goal = sess.active_task or "исследование"
+            server_url = report_server.url if report_server else ""
+            if report_server and len(report) > 200:
+                url = save_report(run_id, goal, report, server_url)
+                await _send(chat_id, f"Исследование завершено.\nСкачать отчёт: {url}")
+            else:
+                await _send(chat_id, "Исследование завершено.")
+
             await _send(chat_id, report)
 
         msg = IncomingMessage(
@@ -83,6 +99,9 @@ async def main() -> None:
         for reply in decision.replies:
             if reply:
                 await _send(chat_id, reply)
+
+    async def _finish_doc(chat_id: int, run_id: str, report: str) -> None:
+        await _finish(run_id, report)
 
     async def _on_document(
         chat_id: int, user_id: int | None, name: str, data: bytes, caption: str
@@ -114,10 +133,7 @@ async def main() -> None:
             decision = await router.route(
                 msg,
                 on_progress=lambda m: _send(chat_id, m),
-                on_finish=lambda rid, report: asyncio.gather(
-                    _send(chat_id, "Исследование завершено."),
-                    _send(chat_id, report),
-                ),
+                on_finish=lambda rid, report: _finish_doc(chat_id, rid, report),
             )
             for reply in decision.replies:
                 if reply:
@@ -154,6 +170,8 @@ async def main() -> None:
     logger.info("Shutting down...")
     await transport.stop()
     await pool.stop()
+    if report_server:
+        report_server.stop()
     await store.close()
     from ora_v2.llm.client import _client as llm_client
     if llm_client:

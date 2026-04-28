@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     metrics_enabled: bool = False
     metrics_port: int = 9090
 
+    # Report server (downloadable HTML reports)
+    report_server_enabled: bool = True
+    report_server_port: int = 8080
+    # Public hostname or IP for download links (auto-detected if empty)
+    report_server_host: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
