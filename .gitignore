@@ -1,0 +1,13 @@
+.env
+*.db
+__pycache__/
+*.pyc
+.DS_Store
+ora_v2/skills/builtins/temp_*.py
+ora_v2/skills/pending/
+documents/
+reports/
+logs/
+.pytest_cache/
+dist/
+*.egg-info/
